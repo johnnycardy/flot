@@ -2325,11 +2325,11 @@ Licensed under the MIT license.
         }
 
         function drawSeriesPoints(series) {
-            function plotPoints(datapoints, radius, fillStyle, offset, shadow, axisx, axisy, symbol) {
-                var points = datapoints.points, ps = datapoints.pointsize;
+            function plotPoints(datapoints, radius, fillStyle, offset, shadow, axisx, axisy, symbol, series) {
+                var points = datapoints.points, ps = datapoints.pointsize, pointIndex = 0;
 
-                for (var i = 0; i < points.length; i += ps) {
-                    var x = points[i], y = points[i + 1];
+                for (var i = 0; i < series.data.length; i++) {
+                    var x = points[pointIndex], y = points[pointIndex + 1];
                     if (x == null || x < axisx.min || x > axisx.max || y < axisy.min || y > axisy.max)
                         continue;
 
@@ -2339,7 +2339,7 @@ Licensed under the MIT license.
                     if (symbol == "circle")
                         ctx.arc(x, y, radius, 0, shadow ? Math.PI : Math.PI * 2, false);
                     else
-                        symbol(ctx, x, y, radius, shadow);
+                        symbol(ctx, x, y, radius, shadow, series.data[i]);
                     ctx.closePath();
 
                     if (fillStyle) {
@@ -2347,6 +2347,7 @@ Licensed under the MIT license.
                         ctx.fill();
                     }
                     ctx.stroke();
+                    pointIndex += ps;
                 }
             }
 
@@ -2372,18 +2373,18 @@ Licensed under the MIT license.
                 ctx.lineWidth = w;
                 ctx.strokeStyle = "rgba(0,0,0,0.1)";
                 plotPoints(series.datapoints, radius, null, w + w/2, true,
-                           series.xaxis, series.yaxis, symbol);
+                           series.xaxis, series.yaxis, symbol, series);
 
                 ctx.strokeStyle = "rgba(0,0,0,0.2)";
                 plotPoints(series.datapoints, radius, null, w/2, true,
-                           series.xaxis, series.yaxis, symbol);
+                           series.xaxis, series.yaxis, symbol, series);
             }
 
             ctx.lineWidth = lw;
             ctx.strokeStyle = series.color;
             plotPoints(series.datapoints, radius,
                        getFillStyle(series.points, series.color), 0, false,
-                       series.xaxis, series.yaxis, symbol);
+                       series.xaxis, series.yaxis, symbol, series);
             ctx.restore();
         }
 
@@ -2797,7 +2798,7 @@ Licensed under the MIT license.
                 }
 
                 if (item)
-                    highlight(item.series, item.datapoint, eventname);
+                    highlight(item, eventname);
             }
 
             placeholder.trigger(eventname, [ pos, item ]);
@@ -2827,16 +2828,32 @@ Licensed under the MIT license.
                 hi = highlights[i];
 
                 if (hi.series.bars.show)
-                    drawBarHighlight(hi.series, hi.point);
+                    drawBarHighlight(hi.series, hi.point, hi.data);
                 else
-                    drawPointHighlight(hi.series, hi.point);
+                    drawPointHighlight(hi.series, hi.point, hi.data);
             }
             octx.restore();
 
             executeHooks(hooks.drawOverlay, [octx]);
         }
 
-        function highlight(s, point, auto) {
+        //For backwards compatibility, this function can take the following arguments:
+        //s (series), point (data point), auto (boolean), OR
+        //pointItem (point object), auto (boolean)
+		
+        function highlight(pointItem, auto, autoDeprecated) {
+            var s, point, data;
+            if(!auto || typeof auto === 'boolean') {
+                //It's the second set of arguments
+                s = pointItem.series;
+                point = pointItem.datapoint;
+            } else {
+                //It's the first set of arguments (deprecated)
+                s = pointItem;
+                point = auto;
+                auto = autoDeprecated;
+            }
+
             if (typeof s == "number")
                 s = series[s];
 
@@ -2845,9 +2862,16 @@ Licensed under the MIT license.
                 point = s.datapoints.points.slice(ps * point, ps * (point + 1));
             }
 
+            if(pointItem.dataIndex) {
+
+                //This happens if the point object was passed into the function (second, newer, set of arguments)
+
+                data = s.data[pointItem.dataIndex];
+            }
+
             var i = indexOfHighlight(s, point);
             if (i == -1) {
-                highlights.push({ series: s, point: point, auto: auto });
+                highlights.push({ series: s, point: point, data: data, auto: auto });
 
                 triggerRedrawOverlay();
             }
@@ -2888,7 +2912,7 @@ Licensed under the MIT license.
             return -1;
         }
 
-        function drawPointHighlight(series, point) {
+        function drawPointHighlight(series, point, data) {
             var x = point[0], y = point[1],
                 axisx = series.xaxis, axisy = series.yaxis,
                 highlightColor = (typeof series.highlightColor === "string") ? series.highlightColor : $.color.parse(series.color).scale('a', 0.5).toString();
@@ -2907,12 +2931,12 @@ Licensed under the MIT license.
             if (series.points.symbol == "circle")
                 octx.arc(x, y, radius, 0, 2 * Math.PI, false);
             else
-                series.points.symbol(octx, x, y, radius, false);
+                series.points.symbol(octx, x, y, radius, false, data);
             octx.closePath();
             octx.stroke();
         }
 
-        function drawBarHighlight(series, point) {
+        function drawBarHighlight(series, point, data) {
             var highlightColor = (typeof series.highlightColor === "string") ? series.highlightColor : $.color.parse(series.color).scale('a', 0.5).toString(),
                 fillStyle = highlightColor,
                 barLeft = series.bars.align == "left" ? 0 : -series.bars.barWidth/2;
